@@ -1,0 +1,235 @@
+-- ALL Queued Volume for CMN - running time - less than 5 min - 6Apr2020
+
+-- Forums
+
+-- It will include:
+-- Pending reviews;
+-- Items that move in and out of queues (such as 62174) due to processor
+-- will only count once for the last time they were queued;
+-- Items that are queued but then autoremoved before reaching an agent
+-- will count as queued but will have null processing date
+
+SELECT
+to_date (queued.QueuedDate)       AS QueuedDate,
+to_date(processed.ProcessedDate)  AS ProcessedDate,
+queued.lang                          AS Language,
+'Forums'                             AS ContentType,
+
+CASE
+WHEN  queued.Queue = 201 THEN 'Reported'
+WHEN  queued.Queue = 202 THEN 'Staff Removed'
+WHEN  queued.Queue = 203 THEN 'Owner Reported'
+WHEN  queued.Queue = 204 THEN 'Voter Removed'
+WHEN  queued.Queue = 207 THEN 'Auto-closed'
+END AS Queue_processed_from,
+
+CASE
+WHEN processed.status = 0 THEN 'Published'
+WHEN processed.status = 4 THEN 'Deleted'
+WHEN processed.status = 22 THEN 'Removed by Vote'
+WHEN processed.status = 23 THEN 'Removed by Author'
+WHEN processed.status = 25 THEN 'Edited'
+WHEN processed.status IN (5,6,7,8,9,10,11,12,13,14,15,16,17) THEN 'Removed by Moderator'
+END AS ActionTaken,
+
+COUNT(queued.post_id) AS Queued_volume,
+COUNT (processed.post_id) AS Processed_volume
+
+FROM
+
+    (SELECT MIN(pehIN.tstamp)    AS QueuedDate,
+           MAX(pehIN.toolqueue)    AS Queue,
+           pehIN.post_id  AS post_id,
+           t.lang  AS lang
+    FROM t_post_edit_history pehIN
+
+    INNER JOIN t_post p
+        ON p.id = pehIN.post_id
+    INNER JOIN t_topic t
+        ON t.id = p.topic_id
+
+    WHERE pehIN.classifier = 'FQ'
+    AND   (pehIN.toolqueue IN (201,207) AND t.lang = 'en')
+         OR
+          (pehIN.toolqueue IN (201,202,203,204) AND t.lang IN ('fr','es','de','ru','it','pt','ja'))
+
+    GROUP BY pehIN.post_id,t.lang) AS queued
+
+LEFT JOIN
+    (SELECT
+           MAX(pehOUT.tstamp) AS ProcessedDate,
+           pehOUT.post_id AS post_id,
+           p.status AS status
+    FROM t_post_edit_history pehOUT
+    INNER JOIN t_post p
+        ON p.id = pehOUT.post_id
+    INNER JOIN t_topic t
+        ON t.id = p.topic_id
+
+    WHERE pehOUT.classifier != 'FQ'
+
+    GROUP BY pehOUT.post_id,p.status) AS processed
+
+ ON queued.post_id=processed.post_id
+
+WHERE queued.QueuedDate >= '2016-01-01'
+
+
+GROUP BY
+to_date (queued.QueuedDate),
+to_date(processed.ProcessedDate),
+queued.lang,
+queued.Queue,
+processed.status
+
+
+UNION ALL
+
+-- Q&As
+-- IDs that were bulk processed (answer:18446871) will show null in processed date since there is a bug that does not mark them as resolved
+
+-- Section 1:Qs
+
+select
+       to_date(tstamp)                       AS QueuedDate,
+       to_date(processeddate)                AS ProcessedDate,
+       lang                                  AS Language,
+       'Questions'                           AS ContentType,
+       'Ask An Owner Reported IAP'           AS Queue_processed_from,
+       CASE WHEN ProcessedDate IS NULL THEN null
+            ELSE status END                  AS ActionTaken,
+       COUNT(DISTINCT topicid) AS Queued_volume,
+       COUNT(DISTINCT CASE WHEN ProcessedDate IS NOT NULL THEN topicid END) AS Processed_volume
+
+from (
+      SELECT topicid,
+      tstamp,
+      te.classifier,
+      te.toolqueue AS toolqueue,
+      t.lang  AS lang,
+      CASE WHEN t.status=2 THEN 'Removed'
+           WHEN t.status=4 THEN 'Published' END as status,
+    -- toolqueue 0 denotes processing row, if next row is toolqueue 0 then give next row
+      CASE when lead(te.toolqueue,1) over (partition by topicid order by tstamp) = 0
+           then lead(to_date(tstamp),1) over (partition by topicid order by tstamp)
+    -- for cases in which the agent enters a comment like "esc to tier 2" but does not process this will jump to the following row
+           when lead(te.toolqueue,1) over (partition by topicid order by tstamp) = 1000
+           then lead(to_date(tstamp),2) over (partition by topicid order by tstamp)
+           else NULL end as ProcessedDate
+
+      FROM t_location_topic_edit_history te
+      INNER JOIN t_location_topic t
+         ON te.topicid = t.id
+
+      WHERE te.tstamp >= '2016-01-01'
+     ) AS partitionquestions
+
+where classifier = 'ProcessAnswerVotes'
+
+GROUP BY
+to_date(tstamp),
+to_date(processeddate),
+lang,
+processeddate,
+status
+
+UNION ALL
+
+--Section 2: As
+
+select
+       to_date(tstamp)                       AS QueuedDate,
+       to_date(processeddate)                AS ProcessedDate,
+       lang                                  AS Language,
+       'Answers'                             AS ContentType,
+       'Ask An Owner Reported IAP'           AS Queue_processed_from,
+       CASE WHEN ProcessedDate IS NULL THEN null
+            ELSE status END                  AS ActionTaken,
+       COUNT(DISTINCT postingid) AS Queued_volume,
+       COUNT(DISTINCT CASE WHEN ProcessedDate IS NOT NULL THEN postingid END) AS Processed_volume
+
+from (
+      SELECT postingid,
+      tstamp,
+      pe.classifier,
+      pe.toolqueue AS toolqueue,
+      lp.lang  AS lang,
+      CASE WHEN lp.st=2 THEN 'Removed'
+           WHEN lp.st=4 THEN 'Published' END as status,
+    -- toolqueue 0 denotes processing row, if next row is toolqueue 0 then give next row
+      CASE when lead(pe.toolqueue,1) over (partition by postingid order by tstamp) = 0
+             then lead(to_date(tstamp),1) over (partition by postingid order by tstamp)
+    -- for cases in which the agent enters a comment like "esc to tier 2" but does not process this will jump to the following row
+           when lead(pe.toolqueue,1) over (partition by postingid order by tstamp) = 1000
+             then lead(to_date(tstamp),2) over (partition by postingid order by tstamp)
+           else NULL end as ProcessedDate
+
+      FROM t_location_posting_edit_history pe
+      INNER JOIN t_location_posting lp
+         ON pe.postingid = lp.id
+
+      WHERE pe.tstamp >= '2016-01-01'
+     ) AS partitionanswers
+
+where classifier = 'ProcessAnswerVotes'
+GROUP BY
+to_date(tstamp),
+to_date(processeddate),
+lang,
+processeddate,
+status
+
+UNION ALL
+
+-- SOCIAL
+
+SELECT
+       tstamp                                AS QueuedDate,
+       processeddate                         AS ProcessedDate,
+       null                                  AS Language,
+       'Social'                              AS ContentType,
+       request_types                         AS Queue_processed_from,
+       null                                  AS ActionTaken,
+       COUNT(DISTINCT content_id) AS Queued_volume,
+       COUNT(DISTINCT CASE WHEN ProcessedDate IS NOT NULL THEN content_id END) AS Processed_volume
+
+FROM (
+      SELECT content_id,
+      tstamp AS tstamp,
+      editor,
+      toolqueue AS   toolqueue,
+      hcomment,
+      CASE content_type
+          WHEN 1 THEN 'Ls'
+          WHEN 2 THEN 'Ts'
+          WHEN 3 THEN 'Rs'
+          WHEN 4 THEN 'Ps'
+          ELSE NULL
+          END AS  request_types,
+      CASE when lead(toolqueue,1) over (partition by content_id order by tstamp) = 0
+           then lead(tstamp,1) over (partition by content_id order by tstamp)
+           else NULL end as ProcessedDate
+
+       -- Subquery to only collect the rows with entries in queue and processing rows
+      FROM (SELECT content_id,
+                   to_date(tstamp) as tstamp,
+                   editor,
+                   toolqueue,
+                   hcomment,
+                   content_type
+          FROM t_content_edit_history ceh
+          WHERE toolqueue IS NOT NULL) AS inout
+
+      WHERE tstamp >= '2016-01-01'
+
+     ) AS partitionquestions
+
+WHERE toolqueue != 0
+AND hcomment = 'Routing'
+
+-- to avoid counting items that are queued more than once before they are processed such as 393979823
+AND processeddate IS NOT NULL
+GROUP BY
+tstamp,
+processeddate,
+request_types
