@@ -1,0 +1,158 @@
+/* CMN Email 1 - running time: less than 1 min */
+
+WITH CMNPending AS(
+
+/* Forums */
+
+SELECT
+'Forums' AS request_types,
+h.post_id AS content_id,
+t.lang AS lang,
+s.classifier as AssignedTo,
+
+MAX(h.tstamp):: TIMESTAMP AS QueuedDate,
+ROUND (EXTRACT(EPOCH FROM (now() - MAX(h.tstamp) at time zone 'EST'))/3600) AS HoursInQueue
+
+
+FROM t_post_tool_state s
+
+LEFT JOIN t_post_edit_history h
+ON h.post_id = s.post_id
+AND h.toolqueue = s.toolqueue
+
+LEFT JOIN t_post p ON p.id = s.post_id
+LEFT JOIN t_topic t ON t.id = p.topic_id
+/* Limit to language/queue combinations we monitor. */
+WHERE (
+   (t.lang = 'en' and s.toolqueue IN (201,207))
+   OR (t.lang IN ('fr','es','de','ru','it','pt','ja') and s.toolqueue IN (201,203,204,207,211))
+   )
+AND s.classifier IS NULL
+and h.post_id != 858205 /* removing this instance as it has an error in the table */
+GROUP BY 1,2,3,4
+
+/* Q&A queues */
+
+UNION
+SELECT
+'Q&A' as request_types,
+lt.id AS content_id,
+lt.lang AS lang,
+lt.classifier as AssignedTo,
+
+MAX(eh.tstamp) AS QueuedDate,
+
+ROUND (EXTRACT(EPOCH FROM (now() - MAX(eh.tstamp) at time zone 'EST'))/3600) AS HoursInQueue
+
+FROM t_location_topic_edit_history eh
+INNER JOIN t_location_topic lt ON eh.topicid = lt.id
+WHERE eh.toolqueue = 100 --it entered the queue
+AND lt.toolqueue = 100 --and is still currently in the queue
+AND lt.status != 2 --Excluding removed items, since we had to review it to remove it
+--limit to supported languages we can see in the tool
+AND lt.created_lang ~* '^(ar|cs|da|nl|en|fi|fr|de|el|iw|hu|in|it|ja|ko|pl|pt|ru|sr|sk|es|sv|th|tr|vi).*'
+AND lt.classifier IS NULL
+
+GROUP BY 1,2,3,4
+
+UNION
+
+/* Answers */
+SELECT
+'Q&A' as request_types,
+lp.id AS content_id,
+lp.lang AS lang,
+lp.classifier as AssignedTo,
+
+MAX(peh.tstamp) AS QueuedDate,
+
+ROUND (EXTRACT(EPOCH FROM (now() - MAX(peh.tstamp) at time zone 'EST'))/3600) AS HoursInQueue
+
+FROM t_location_posting_edit_history peh
+INNER JOIN t_location_posting lp ON peh.postingid = lp.id
+WHERE peh.toolqueue = 100 --it entered the queue
+AND lp.toolqueue = 100 --and is still currently in the queue
+AND lp.status != 2 --Excluding removed items, since we had to review it to remove it
+--limit to supported languages we can see in the tool
+AND lp.created_lang ~* '^(ar|cs|da|nl|en|fi|fr|de|el|iw|hu|in|it|ja|ko|pl|pt|ru|sr|sk|es|sv|th|tr|vi).*'
+AND lp.classifier IS NULL
+GROUP BY 1,2,3,4
+
+UNION
+
+/* Social */
+
+SELECT
+
+CASE
+WHEN q.toolqueue = 301 THEN 'Ls'
+WHEN q.toolqueue = 401 THEN 'Ts'
+WHEN q.toolqueue = 502 THEN 'Rs'
+WHEN q.toolqueue = 601 THEN 'Ps'
+END as request_types,
+
+
+q.content_id AS content_id,
+'n/a' AS lang,
+
+q.classifier as AssignedTo,
+
+MAX(eh.tstamp) AS QueuedDate,
+ROUND (EXTRACT(EPOCH FROM (now() - MAX(eh.tstamp) at time zone 'EST'))/3600) AS HoursInQueue
+
+FROM t_content_queue q
+inner join  t_content_edit_history eh
+on q.content_id = eh.content_id
+
+where q.toolqueue  IN (301,401,501,601)
+AND eh.comment = 'Routing for moderation'
+AND eh.editor != 'ContentKafka'
+
+and not exists(
+    select 1 from t_content_edit_history exclude
+    where exclude.content_id = q.content_id
+    and exclude.comment like '%DELETE%'
+    )
+
+and not exists(
+    select 1 from t_content_queue exclude
+    where exclude.content_id = q.content_id
+    and q.toolqueue  = 401
+    and q.content_id = 858205
+    )  /* removing this instance as it has an error in the table */
+
+and q.content_id >= 0
+-- and q.content_id = 349813054 /* Temporary, just for testing */
+--AND q.classifier IS NULL  /* Temporary, just for testing */
+
+GROUP BY 1,2,3,4
+)
+
+
+
+SELECT
+   'Community' as category,
+        lang as language,
+      COUNT(DISTINCT CASE WHEN HoursInQueue < 24 THEN content_id END )  as not_backlogged,
+      COUNT(DISTINCT CASE WHEN HoursInQueue BETWEEN 20 AND 24 THEN content_id END )  as approachingTAT,
+      COUNT(DISTINCT CASE WHEN HoursInQueue >= 24 THEN content_id END )  as backlogged,
+      CONCAT (ROUND(COUNT(DISTINCT CASE WHEN HoursInQueue >= 24 THEN content_id END )*100 :: NUMERIC / COUNT(DISTINCT content_id) :: NUMERIC,2), '%') as percent_backlogged
+
+FROM CommunityURDPending
+
+GROUP BY 1,2
+
+UNION
+
+
+SELECT
+   ' TOTAL Community' as category,
+   'All' as language,
+      COUNT(DISTINCT CASE WHEN HoursInQueue < 24 THEN content_id END )  as not_backlogged,
+      COUNT(DISTINCT CASE WHEN HoursInQueue BETWEEN 20 AND 24 THEN content_id END )  as approachingTAT,
+      COUNT(DISTINCT CASE WHEN HoursInQueue >= 24 THEN content_id END )  as backlogged,
+      CONCAT (ROUND(COUNT(DISTINCT CASE WHEN HoursInQueue >= 24 THEN content_id END )*100 :: NUMERIC / COUNT(DISTINCT content_id) :: NUMERIC,2), '%') as percent_backlogged
+
+FROM CommunityURDPending
+
+GROUP BY 1,2 ORDER BY 2
