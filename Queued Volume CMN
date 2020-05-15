@@ -1,4 +1,5 @@
 -- ALL Queued Volume for CMN - running time - less than 5 min - 6Apr2020
+-- Already optimized to run in Snowflake or Hadoop
 
 -- Forums
 
