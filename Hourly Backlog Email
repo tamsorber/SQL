@@ -1,0 +1,262 @@
+-- Email 1 - running time around 5 min
+-- 26Mar2020 - Adding queue 41 (to track COVID-19 related content)
+
+-- T1 backlogged vs approachingTAT vs notbacklogged
+
+       SELECT
+
+       QueueCategory as category,
+       ReviewLanguage as language,
+       COUNT(DISTINCT CASE WHEN HoursInQueue < 48 THEN ReviewID END )  as not_backlogged,
+       COUNT(DISTINCT CASE WHEN HoursInQueue BETWEEN 44 AND 48 THEN ReviewID END )  as approachingTAT,
+       COUNT(DISTINCT CASE WHEN HoursInQueue >= 48 THEN ReviewID END )  as backlogged,
+       CONCAT (ROUND(COUNT(DISTINCT CASE WHEN HoursInQueue >= 48 THEN ReviewID END )*100 :: NUMERIC / COUNT(DISTINCT ReviewID) :: NUMERIC,2), '%') as percent_backlogged
+
+
+   FROM (
+        SELECT
+             CASE
+             WHEN ur.toolqueue IN (92, 93, 94, 95, 96, 97, 98, 100, 101, 103, 104)
+          THEN 'Incoming'
+             WHEN ur.toolqueue IN (9, 24, 25, 37, 48, 27, 28, 49, 57, 109, 110)
+          THEN 'Reported'
+             WHEN ur.toolqueue IN (70,71)
+          THEN 'VR Incoming'
+             WHEN ur.toolqueue IN (79)
+          THEN 'VR Reported'
+              WHEN ur.toolqueue IN (2, 99, 105)
+          THEN 'Tier 2 Queues'
+              WHEN ur.toolqueue IN (11)
+          THEN 'TBR'
+              WHEN ur.toolqueue IN (41)
+          THEN 'COVID-19'
+             END      AS QueueCategory,
+
+
+
+             ur.lang        AS ReviewLanguage,
+             ur.id          AS ReviewID,
+             ROUND((EXTRACT(EPOCH FROM (now() - (SELECT vwh.max_date
+                        FROM vw_history_min_max vwh
+                        WHERE vwh.userreviewid = ur.id)at time zone 'EST')) / 3600) :: NUMERIC, 2) AS HoursInQueue
+
+         FROM t_userreview ur
+
+         WHERE
+          ur.toolqueue IN (92, 93, 94, 95, 96, 97, 98, 100, 101, 103, 104, 41,
+                           70, 71,
+                           2, 99, 105, 11)  /* T1*/
+          AND ur.status IN (8)
+
+--AND ur.lang IN ('en', 'es', 'fr') /* Filter to test query, grayed out otherwise */
+
+          AND ur.providerid not in (6) -- excludes provider DDA
+
+
+          AND (ur.classifier IS NULL  /* Filter out reviews assigned */
+          OR ur.classifier LIKE ('')) /* Filter in reviews where assignment was cleared*/
+
+          /* Filter out reviews for test properties */
+          AND ur.locationid NOT IN (25350, 25880, 25891, 25882, 25848, 25868, 25837, 25883,
+          26086, 26080, 26028, 25951, 25928, 2891, 2831, 71099)
+             ) AS Tier1
+   WHERE HoursInQueue IS NOT NULL
+
+   GROUP BY 1,2
+
+UNION
+
+-- Section added as requested by stakeholders to include TOTALs for the previous section
+
+   SELECT
+       CONCAT(' TOTAL ', QueueCategory) as category,
+        'All'         AS language,
+      COUNT(DISTINCT CASE WHEN HoursInQueue < 48 THEN ReviewID END )  as not_backlogged,
+      COUNT(DISTINCT CASE WHEN HoursInQueue BETWEEN 44 AND 48 THEN ReviewID END )  as approachingTAT,
+      COUNT(DISTINCT CASE WHEN HoursInQueue >= 48 THEN ReviewID END )  as backlogged,
+      CONCAT (ROUND(COUNT(DISTINCT CASE WHEN HoursInQueue >= 48 THEN ReviewID END )*100 :: NUMERIC / COUNT(DISTINCT ReviewID) :: NUMERIC,2), '%') as percent_backlogged
+
+   FROM (SELECT
+             CASE
+             WHEN ur.toolqueue IN (92, 93, 94, 95, 96, 97, 98, 100, 101, 103, 104)
+          THEN 'Incoming'
+             WHEN ur.toolqueue IN (9, 24, 25, 37, 48, 27, 28, 49, 57, 109, 110)
+          THEN 'Reported'
+             WHEN ur.toolqueue IN (70,71)
+          THEN 'VR Incoming'
+             WHEN ur.toolqueue IN (79)
+          THEN 'VR Reported'
+              WHEN ur.toolqueue IN (2, 99, 105)
+          THEN 'Tier 2 Queues'
+              WHEN ur.toolqueue IN (11)
+          THEN 'TBR'
+              WHEN ur.toolqueue IN (41)
+          THEN 'COVID-19'
+             END      AS QueueCategory,
+
+
+
+             ur.lang        AS ReviewLanguage,
+             ur.id          AS ReviewID,
+             ROUND((EXTRACT(EPOCH FROM (now() - (SELECT vwh.max_date
+                        FROM vw_history_min_max vwh
+                        WHERE vwh.userreviewid = ur.id)at time zone 'EST')) / 3600) :: NUMERIC, 2) AS HoursInQueue
+
+         FROM t_userreview ur
+
+         WHERE
+          ur.toolqueue IN (92, 93, 94, 95, 96, 97, 98, 100, 101, 103, 104, 41,
+                           70, 71,
+                           2, 99, 105, 11)  -- Tier 1
+          AND ur.status IN (8)
+
+
+
+          AND ur.providerid not in (6) -- excludes DaoDao
+
+
+          AND (ur.classifier IS NULL  /* Filter out reviews assigned */
+          OR ur.classifier LIKE ('')) /* Filter in reviews where assignment was cleared*/
+
+          /* Filter out reviews for test properties */
+          AND ur.locationid NOT IN (25350, 25880, 25891, 25882, 25848, 25868, 25837, 25883,
+          26086, 26080, 26028, 25951, 25928, 2891, 2831, 71099)
+             ) AS Tier1
+
+   WHERE HoursInQueue IS NOT NULL
+
+   GROUP BY 1,2
+
+UNION
+
+-- Rep backlogged vs approachingTAT vs notbacklogged
+
+       SELECT
+
+       QueueCategory as category,
+       ReviewLanguage as language,
+      COUNT(DISTINCT CASE WHEN HoursInQueue < 24 THEN ReviewID END )  as not_backlogged,
+      COUNT(DISTINCT CASE WHEN HoursInQueue BETWEEN 20 AND 24 THEN ReviewID END )  as approachingTAT,
+      COUNT(DISTINCT CASE WHEN HoursInQueue >= 24 THEN ReviewID END )  as backlogged,
+      CONCAT (ROUND(COUNT(DISTINCT CASE WHEN HoursInQueue >= 24 THEN ReviewID END )*100 :: NUMERIC / COUNT(DISTINCT ReviewID) :: NUMERIC,2), '%') as percent_backlogged
+
+
+   FROM (
+        SELECT
+             CASE
+             WHEN ur.toolqueue IN (92, 93, 94, 95, 96, 97, 98, 100, 101, 103, 104)
+          THEN 'Incoming'
+             WHEN ur.toolqueue IN (9, 24, 25, 37, 48, 27, 28, 49, 57, 109, 110)
+          THEN 'Reported'
+             WHEN ur.toolqueue IN (70,71)
+          THEN 'VR Incoming'
+             WHEN ur.toolqueue IN (79)
+          THEN 'VR Reported'
+              WHEN ur.toolqueue IN (2, 99, 105)
+          THEN 'Tier 2 Queues'
+              WHEN ur.toolqueue IN (11)
+          THEN 'TBR'
+              WHEN ur.toolqueue IN (41)
+          THEN 'COVID-19'
+
+             END      AS QueueCategory,
+
+
+
+             ur.lang        AS ReviewLanguage,
+             ur.id          AS ReviewID,
+             ROUND((EXTRACT(EPOCH FROM (now() - (SELECT vwh.max_date
+                        FROM vw_history_min_max vwh
+                        WHERE vwh.userreviewid = ur.id)at time zone 'EST')) / 3600) :: NUMERIC, 2) AS HoursInQueue
+
+         FROM t_userreview ur
+
+         WHERE
+          ur.toolqueue IN (57,
+                           9, 24, 25, 37, 48, 27, 28, 49,
+                           109, 110,
+                           79)  /* Reported*/
+
+          AND ur.status IN (4, 8)
+
+
+          AND ur.providerid not in (6) -- excludes provider DDA
+
+
+          AND (ur.classifier IS NULL  /* Filter out reviews assigned */
+          OR ur.classifier LIKE ('')) /* Filter in reviews where assignment was cleared*/
+
+          -- Filter out reviews for test properties
+          AND ur.locationid NOT IN (25350, 25880, 25891, 25882, 25848, 25868, 25837, 25883,
+          26086, 26080, 26028, 25951, 25928, 2891, 2831, 71099)
+             ) AS Tier1
+   WHERE HoursInQueue IS NOT NULL
+
+   GROUP BY 1,2
+
+UNION
+
+-- Section added as requested by stakeholders to include TOTALs for the previous section
+
+   SELECT
+       CONCAT(' TOTAL ', QueueCategory) as category,
+        'All'         AS language,
+      COUNT(DISTINCT CASE WHEN HoursInQueue < 24 THEN ReviewID END )  as not_backlogged,
+      COUNT(DISTINCT CASE WHEN HoursInQueue BETWEEN 20 AND 24 THEN ReviewID END )  as approachingTAT,
+      COUNT(DISTINCT CASE WHEN HoursInQueue >= 24 THEN ReviewID END )  as backlogged,
+      CONCAT (ROUND(COUNT(DISTINCT CASE WHEN HoursInQueue >= 24 THEN ReviewID END )*100 :: NUMERIC / COUNT(DISTINCT ReviewID) :: NUMERIC,2), '%') as percent_backlogged
+
+   FROM (SELECT
+             CASE
+             WHEN ur.toolqueue IN (92, 93, 94, 95, 96, 97, 98, 100, 101, 103, 104)
+          THEN 'CMI - Incoming'
+             WHEN ur.toolqueue IN (9, 24, 25, 37, 48, 27, 28, 49, 57, 109, 110)
+          THEN 'CMI - Reported'
+             WHEN ur.toolqueue IN (70,71)
+          THEN 'VR Incoming'
+             WHEN ur.toolqueue IN (79)
+          THEN 'VR Reported'
+              WHEN ur.toolqueue IN (2, 99, 105)
+          THEN 'CMI - Tier 2 Queues'
+              WHEN ur.toolqueue IN (11)
+          THEN 'CMI - TBR'
+              WHEN ur.toolqueue IN (41)
+          THEN 'CMI - COVID-19'
+
+             END      AS QueueCategory,
+
+
+
+             ur.lang        AS ReviewLanguage,
+             ur.id          AS ReviewID,
+             ROUND((EXTRACT(EPOCH FROM (now() - (SELECT vwh.max_date
+                        FROM vw_history_min_max vwh
+                        WHERE vwh.userreviewid = ur.id)at time zone 'EST')) / 3600) :: NUMERIC, 2) AS HoursInQueue
+
+         FROM t_userreview ur
+
+         WHERE
+         ur.toolqueue IN (57,
+                          9, 24, 25, 37, 48, 27, 28, 49,
+                          109, 110,
+                          79)  /* Reported*/
+
+          AND ur.status IN (4, 8)
+
+
+         --AND ur.lang IN ('en', 'es', 'fr') /* Filter to test query, grayed out otherwise */
+
+          AND ur.providerid not in (6) -- excludes provider DDA
+
+
+          AND (ur.classifier IS NULL  /* Filter out reviews assigned */
+          OR ur.classifier LIKE ('')) /* Filter in reviews where assignment was cleared*/
+
+          /* Filter out reviews for test properties */
+          AND ur.locationid NOT IN (25350, 25880, 25891, 25882, 25848, 25868, 25837, 25883,
+          26086, 26080, 26028, 25951, 25928, 2891, 2831, 71099)
+             ) AS Reported
+
+   WHERE HoursInQueue IS NOT NULL
+
+   GROUP BY 1,2
