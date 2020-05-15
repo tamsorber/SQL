@@ -1,0 +1,292 @@
+-- Email 2 - Incoming and Reported - total Running time less than 5 min
+-- 26Mar2020 - Adding queue 41 (to track COVID-19 related content)
+
+-- Pending items
+
+SELECT
+       lob,
+       language,
+       queue,
+       id,
+       --assignedto,
+       turnaround_time,
+       hours_since_escalation
+
+    From (    SELECT QueueCategory                  as lob,
+           ReviewLanguage                 as language,
+           Queue                          as queue,
+           ReviewID                       as id,
+           AssignedTo                     as assignedto,
+           HoursinQueue                   as turnaround_time,
+           HoursAssigned                  as hours_since_escalation,
+
+           COUNT(DISTINCT CASE WHEN HoursInQueue >= 48 THEN ReviewID END) as backlogged
+
+
+    FROM (         SELECT
+             CASE
+             WHEN ur.toolqueue IN (92, 93, 94, 95, 96, 97, 98, 100, 101, 103, 104)
+          THEN 'CMI - Incoming'
+             WHEN ur.toolqueue IN (9, 24, 25, 37, 48, 27, 28, 49, 57, 109, 110)
+          THEN 'CMI - Reported'
+             WHEN ur.toolqueue IN (70,71)
+          THEN 'VR Incoming'
+             WHEN ur.toolqueue IN (79)
+          THEN 'VR Reported'
+              WHEN ur.toolqueue IN (2, 99, 105)
+          THEN 'CMI - Tier 2 Queues'
+              WHEN ur.toolqueue IN (11)
+          THEN 'CMI - TBR'
+              WHEN ur.toolqueue IN (41)
+          THEN 'CMI - COVID-19'
+             END      AS QueueCategory,
+
+            CASE WHEN ur.toolqueue = 92
+          THEN 'CC'
+             WHEN ur.toolqueue = 93
+          THEN 'CLR'
+             WHEN ur.toolqueue = 94
+          THEN 'CR'
+             WHEN ur.toolqueue = 95
+          THEN 'DC'
+             WHEN ur.toolqueue = 96
+          THEN 'HRC'
+             WHEN ur.toolqueue = 97
+          THEN 'LRC'
+             WHEN ur.toolqueue = 98
+          THEN 'T1EC'
+             WHEN ur.toolqueue = 100
+          THEN 'T1F'
+             WHEN ur.toolqueue = 101
+          THEN 'T1EF'
+             WHEN ur.toolqueue = 103
+          THEN 'DF'
+             WHEN ur.toolqueue = 104
+          THEN 'FR'
+              WHEN ur.toolqueue = 57
+          THEN 'EPh'
+              WHEN ur.toolqueue = 11
+          THEN 'TBR'
+              WHEN ur.toolqueue = 70
+          THEN 'VRB'
+              WHEN ur.toolqueue = 71
+          THEN 'VRA'
+              WHEN ur.toolqueue = 79
+          THEN 'VRR'
+              WHEN ur.toolqueue = 9
+          THEN 'SU'
+             WHEN ur.toolqueue = 24
+          THEN 'RIAP'
+              WHEN ur.toolqueue = 25
+          THEN 'SVo'
+              WHEN ur.toolqueue = 37
+          THEN 'ROR'
+               WHEN ur.toolqueue = 48
+          THEN 'URM'
+               WHEN ur.toolqueue = 27
+          THEN 'ORIAP'
+              WHEN ur.toolqueue = 28
+          THEN 'ORF'
+              WHEN ur.toolqueue = 49
+          THEN 'ORM'
+              WHEN ur.toolqueue = 109
+          THEN 'ERMed'
+               WHEN ur.toolqueue = 110
+          THEN 'EORMed'
+              WHEN ur.toolqueue = 2
+          THEN 'Unat'
+              WHEN ur.toolqueue = 99
+          THEN 'T2EC'
+               WHEN ur.toolqueue = 105
+          THEN 'T2EF'
+               WHEN ur.toolqueue = 41
+          THEN 'COVID-19'
+
+                  ELSE ur.toolqueue::text END         AS Queue,
+
+
+
+
+             ur.lang        AS ReviewLanguage,
+             ur.id          AS ReviewID,
+             ur.classifier as AssignedTo,
+
+              ROUND((EXTRACT(EPOCH FROM (now() - (SELECT vwh.max_date
+                        FROM vw_history_min_max vwh
+                        WHERE vwh.userreviewid = ur.id)at time zone 'EST')) / 3600) :: NUMERIC, 2) AS HoursInQueue,
+             0 AS HoursAssigned
+
+
+       FROM t_userreview ur
+
+
+       WHERE
+          ur.toolqueue IN (92, 93, 94, 95, 96, 97, 98, 100, 101, 103, 104, 41,
+                           70, 71,
+                           2, 99, 105, 11)  /* Tier 1*/
+
+          AND ur.status IN (8)
+
+--AND ur.lang IN ('en', 'es', 'fr') /* Filter to test query, grayed out for now */
+
+          AND ur.providerid not in (6) -- excludes provider DDA
+
+AND ur.classifier IS NULL    /* Filter out reviews assigned */
+
+          /* Filter out reviews for test properties */
+         AND ur.locationid NOT IN (25350, 25880, 25891, 25882, 25848, 25868, 25837, 25883,
+          26086, 26080, 26028, 25951, 25928, 2891, 2831, 71099)
+
+           GROUP BY 1, 2, 3, 4, 5, 7) AS Tier1
+    WHERE HoursInQueue IS NOT NULL
+
+
+    GROUP BY 1, 2, 3, 4, 5, 6, 7) AS BackloggedQueues
+    WHERE backlogged != 0
+
+UNION
+
+
+-- Pending Reported reviews
+
+SELECT
+       lob,
+       language,
+       queue,
+       id,
+       --assignedto,
+       turnaround_time,
+       hours_since_escalation
+
+    From (    SELECT QueueCategory                  as lob,
+           ReviewLanguage                 as language,
+           Queue                          as queue,
+           ReviewID                       as id,
+           AssignedTo                     as assignedto,
+           HoursinQueue                   as turnaround_time,
+           HoursAssigned                  as hours_since_escalation,
+
+           COUNT(DISTINCT CASE WHEN HoursInQueue >= 24 THEN ReviewID END) as backlogged
+
+
+    FROM (         SELECT
+             CASE
+             WHEN ur.toolqueue IN (92, 93, 94, 95, 96, 97, 98, 100, 101, 103, 104)
+          THEN 'CMI - Incoming'
+             WHEN ur.toolqueue IN (9, 24, 25, 37, 48, 27, 28, 49, 57, 109, 110)
+          THEN 'CMI - Reported'
+             WHEN ur.toolqueue IN (70,71)
+          THEN 'VR Incoming'
+             WHEN ur.toolqueue IN (79)
+          THEN 'VR Reported'
+              WHEN ur.toolqueue IN (2, 99, 105)
+          THEN 'CMI - Tier 2 Queues'
+              WHEN ur.toolqueue IN (11)
+          THEN 'CMI - TBR'
+              WHEN ur.toolqueue IN (41)
+          THEN 'CMI - COVID-19'
+             END      AS QueueCategory,
+
+            CASE WHEN ur.toolqueue = 92
+          THEN 'CC'
+             WHEN ur.toolqueue = 93
+          THEN 'CLR'
+             WHEN ur.toolqueue = 94
+          THEN 'CR'
+             WHEN ur.toolqueue = 95
+          THEN 'DC'
+             WHEN ur.toolqueue = 96
+          THEN 'HRC'
+             WHEN ur.toolqueue = 97
+          THEN 'LRC'
+             WHEN ur.toolqueue = 98
+          THEN 'T1EC'
+             WHEN ur.toolqueue = 100
+          THEN 'T1F'
+             WHEN ur.toolqueue = 101
+          THEN 'T1EF'
+             WHEN ur.toolqueue = 103
+          THEN 'DF'
+             WHEN ur.toolqueue = 104
+          THEN 'FR'
+              WHEN ur.toolqueue = 57
+          THEN 'EPh'
+              WHEN ur.toolqueue = 11
+          THEN 'TBR'
+              WHEN ur.toolqueue = 70
+          THEN 'VRB'
+              WHEN ur.toolqueue = 71
+          THEN 'VRA'
+              WHEN ur.toolqueue = 79
+          THEN 'VRR'
+              WHEN ur.toolqueue = 9
+          THEN 'SU'
+             WHEN ur.toolqueue = 24
+          THEN 'RIAP'
+              WHEN ur.toolqueue = 25
+          THEN 'SVo'
+              WHEN ur.toolqueue = 37
+          THEN 'ROR'
+               WHEN ur.toolqueue = 48
+          THEN 'URM'
+               WHEN ur.toolqueue = 27
+          THEN 'ORIAP'
+              WHEN ur.toolqueue = 28
+          THEN 'ORF'
+              WHEN ur.toolqueue = 49
+          THEN 'ORM'
+              WHEN ur.toolqueue = 109
+          THEN 'ERMed'
+               WHEN ur.toolqueue = 110
+          THEN 'EORMed'
+              WHEN ur.toolqueue = 2
+          THEN 'Unat'
+              WHEN ur.toolqueue = 99
+          THEN 'T2EC'
+               WHEN ur.toolqueue = 105
+          THEN 'T2EF'
+               WHEN ur.toolqueue = 41
+          THEN 'COVID-19'
+
+                  ELSE ur.toolqueue::text END         AS Queue,
+
+
+
+
+             ur.lang        AS ReviewLanguage,
+             ur.id          AS ReviewID,
+             ur.classifier as AssignedTo,
+
+              ROUND((EXTRACT(EPOCH FROM (now() - (SELECT vwh.max_date
+                        FROM vw_history_min_max vwh
+                        WHERE vwh.userreviewid = ur.id)at time zone 'EST')) / 3600) :: NUMERIC, 2) AS HoursInQueue,
+             0 AS HoursAssigned
+
+
+       FROM t_userreview ur
+
+
+       WHERE
+          ur.toolqueue IN (57,
+                           9, 24, 25, 37, 48, 27, 28, 49,
+                           109, 110,
+                           79)  /* Reported*/
+
+          AND ur.status IN (4, 8)
+
+--AND ur.lang IN ('en', 'es', 'fr') /* Filter to test query, grayed out for now */
+
+          AND ur.providerid not in (6) -- excludes provider DDA
+
+AND ur.classifier IS NULL    /* Filter out reviews assigned */
+
+          /* Filter out reviews for test properties */
+         AND ur.locationid NOT IN (25350, 25880, 25891, 25882, 25848, 25868, 25837, 25883,
+          26086, 26080, 26028, 25951, 25928, 2891, 2831, 71099)
+
+           GROUP BY 1, 2, 3, 4, 5, 7) AS Reported
+    WHERE HoursInQueue IS NOT NULL
+
+
+    GROUP BY 1, 2, 3, 4, 5, 6, 7) AS BackloggedQueues
+    WHERE backlogged != 0
